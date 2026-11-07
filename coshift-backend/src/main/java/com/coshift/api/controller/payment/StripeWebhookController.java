@@ -102,7 +102,21 @@ public class StripeWebhookController {
         }
 
         if ("payment_intent.succeeded".equals(evenement.getType())) {
-            evenement.getDataObjectDeserializer().getObject()
+            /* getObject() est vide quand la version d'API de l'événement diffère
+               de celle du SDK (endpoint resté sur une version antérieure) : on
+               retombe alors sur la désérialisation tolérante, sinon le paiement
+               ne serait jamais confirmé. */
+            java.util.Optional.ofNullable(
+                            evenement.getDataObjectDeserializer().getObject()
+                                    .orElseGet(() -> {
+                                        try {
+                                            return evenement.getDataObjectDeserializer().deserializeUnsafe();
+                                        } catch (com.stripe.exception.EventDataObjectDeserializationException e) {
+                                            log.warn("Objet de l'événement {} illisible : {}",
+                                                    evenement.getId(), e.getMessage());
+                                            return null;
+                                        }
+                                    }))
                     .filter(PaymentIntent.class::isInstance)
                     .map(PaymentIntent.class::cast)
                     .ifPresent(intention -> paymentService.confirmerDepuisPrestataire(intention.getId()));
